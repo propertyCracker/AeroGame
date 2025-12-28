@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AeroGame - Fly Through the Pillars</title>
+    <meta name="description"
+        content="Navigate your plane through randomly generated pillars in this exciting 3D flying game">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div id="game-container">
+        <div id="hud">
+            <div class="hud-item">
+                <span class="hud-label">Speed:</span>
+                <span id="speed-display">50</span>
+                <span class="hud-unit">km/h</span>
+            </div>
+            <div class="hud-item">
+                <span class="hud-label">Score:</span>
+                <span id="score-display">0</span>
+            </div>
+            <div class="hud-item">
+                <span class="hud-label">Distance:</span>
+                <span id="distance-display">0</span>
+                <span class="hud-unit">m</span>
+            </div>
+            <div class="hud-item" id="level-info-container">
+                <span id="level-info">Level 1 - 3000m to goal</span>
+            </div>
+        </div>
+
+        <div id="controls-info">
+            <h3>Controls</h3>
+            <p><strong>W</strong> - Increase Speed</p>
+            <p><strong>S</strong> - Decrease Speed</p>
+            <p><strong>D</strong> - Steer Right</p>
+            <p><strong>A</strong> - Steer Left</p>
+            <p><strong>↑</strong> - Pitch Down</p>
+            <p><strong>↓</strong> - Pitch Up</p>
+        </div>
+
+        <div id="game-over" class="hidden">
+            <h1>Game Over!</h1>
+            <p>Final Score: <span id="final-score">0</span></p>
+            <p>Distance Traveled: <span id="final-distance">0</span>m</p>
+            <button id="restart-btn">Restart Game</button>
+            <p>
+                
+            </p>
+            <button id="main-menu-btn">Main Menu</button>
+        </div>
+
+        <div id="start-screen">
+            <h1>AeroGame</h1>
+            <p>Fly your plane through the golden rings!</p>
+            <div class="level-selection">
+                <h2>Select Level</h2>
+                <div class="level-buttons">
+                    <button class="level-btn" data-level="1">Level 1<br><span
+                            class="level-distance">3000m</span></button>
+                    <button class="level-btn locked" data-level="2" disabled>Level 2<br><span
+                            class="level-distance">6000m</span></button>
+                    <button class="level-btn locked" data-level="3" disabled>Level 3<br><span
+                            class="level-distance">9000m</span></button>
+                    <button class="level-btn locked" data-level="4" disabled>Level 4<br><span
+                            class="level-distance">12000m</span></button>
+                    <button class="level-btn locked" data-level="5" disabled>Level 5<br><span
+                            class="level-distance">15000m</span></button>
+                </div>
+            </div>
+            <button id="start-btn">Start Level 1</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="game.js"></script>
+</body>
+
+</html>
