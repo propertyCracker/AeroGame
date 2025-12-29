@@ -2,6 +2,9 @@
 let scene, camera, renderer;
 let plane;
 let pillars = [];
+let barriers = []; // Boundary barriers
+let ground = null; // Ground mesh
+let towerModel = null; // Tower GLB model for pillars
 let goldenRing = null;
 let directionalLight; // Main sun light that follows the plane
 let keys = {};
@@ -39,6 +42,61 @@ const LEVELS = [
     { number: 5, distance: 15000, unlocked: false }
 ];
 
+// ===== DEVELOPER SETTINGS =====
+// Set to true to lock levels (must complete previous level to unlock)
+// Set to false to unlock all levels for testing
+const LOCK_LEVEL = true;
+// ==============================
+
+// Level themes
+const LEVEL_THEMES = {
+    1: { // Grass
+        name: 'Grass',
+        groundColor: '#3a9d23',
+        groundVariation: { r: 58, g: 157, b: 35 },
+        skyColor: 0x87CEEB, // Sky blue
+        fogColor: 0x87CEEB,
+        ambientLight: 0xffffff,
+        skyBackground: 'grass.png' // No image, use solid color
+    },
+    2: { // Ice
+        name: 'Ice',
+        groundColor: '#d0e8f2',
+        groundVariation: { r: 208, g: 232, b: 242 },
+        skyColor: 0xb0d4e8, // Light blue-gray
+        fogColor: 0xb0d4e8,
+        ambientLight: 0xe0f0ff,
+        skyBackground: 'ice.png' // No image, use solid color
+    },
+    3: { // Desert
+        name: 'Desert',
+        groundColor: '#d4a574',
+        groundVariation: { r: 212, g: 165, b: 116 },
+        skyColor: 0xffd89b, // Sandy yellow
+        fogColor: 0xffd89b,
+        ambientLight: 0xfff4e0,
+        skyBackground: 'desert.png' // No image, use solid color
+    },
+    4: { // Halloween
+        name: 'Halloween',
+        groundColor: '#6b2d8f',
+        groundVariation: { r: 107, g: 45, b: 143 },
+        skyColor: 0x2a0845, // Dark purple
+        fogColor: 0x2a0845,
+        ambientLight: 0xff8800,
+        skyBackground: 'halloween.png' // Halloween sky image
+    },
+    5: { // Above clouds
+        name: 'Above Clouds',
+        groundColor: '#ffffff',
+        groundVariation: { r: 255, g: 255, b: 255 },
+        skyColor: 0x4a90e2, // Bright sky blue
+        fogColor: 0x4a90e2,
+        ambientLight: 0xffffff,
+        skyBackground: 'clouds.png' // No image, use solid color
+    }
+};
+
 // Game state
 let currentLevel = 1;
 let levelDistance = LEVELS[0].distance;
@@ -55,7 +113,7 @@ function init() {
     // Create scene
     scene = new THREE.Scene();
     scene.fog = new THREE.Fog(0x87CEEB, 50, 20000);
-    scene.background = new THREE.Color(0x87CEEB); // Sky blue
+    scene.background = new THREE.Color(0x87CEEB); // Default sky blue
 
     // Create camera
     camera = new THREE.PerspectiveCamera(
@@ -108,14 +166,11 @@ function init() {
     // Create plane
     createPlane();
 
-    // Create ground
-    createGround();
+    // Load tower model for pillars (will generate pillars after loading)
+    loadTowerModel();
 
-    // Generate pillars across the map
-    generatePillars();
-
-    // Create golden ring at the end
-    createGoldenRing();
+    // Create ground with level theme
+    createGround(currentLevel);
 
     // Event listeners
     window.addEventListener('resize', onWindowResize);
@@ -130,6 +185,9 @@ function init() {
     document.querySelectorAll('.level-btn').forEach(btn => {
         btn.addEventListener('click', selectLevel);
     });
+
+    // Initialize level button states
+    updateLevelButtons();
 
     // Start animation loop
     animate();
@@ -183,56 +241,302 @@ function createPlane() {
     );
 }
 
-// Create ground
-function createGround() {
-    // Create a realistic grass texture
+// Load tower model for pillars
+function loadTowerModel() {
+    // Select model based on current level
+    let modelFile;
+    switch (currentLevel) {
+        case 1:
+            modelFile = 'log.glb';
+            break;
+        case 2:
+            modelFile = 'tower.glb';
+            break;
+        case 3:
+            modelFile = 'cactus.glb';
+            break;
+        case 4:
+            modelFile = 'dead_tree.glb';
+            break;
+        case 5:
+            modelFile = 'tower.glb';
+            break;
+        default:
+            modelFile = 'log.glb'; // Fallback
+    }
+
+    const loader = new THREE.GLTFLoader();
+    loader.load(
+        modelFile,
+        function (gltf) {
+            // Store the loaded model
+            towerModel = gltf.scene;
+
+            // Fix materials and enable shadows for all meshes in the model
+            towerModel.traverse((child) => {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+
+                    // Fix material properties for better lighting
+                    if (child.material) {
+                        // Ensure the material responds to lights properly
+                        child.material.needsUpdate = true;
+
+                        // If the material is too dark, adjust its properties
+                        if (child.material.color) {
+                            // Brighten the color significantly
+                            const color = child.material.color;
+                            const brightness = (color.r + color.g + color.b) / 3;
+
+                            // If the color is dark, brighten it significantly
+                            if (brightness < 0.3) {
+                                // Multiply by 5 to make it much brighter
+                                child.material.color.multiplyScalar(5);
+                            } else if (brightness < 0.5) {
+                                // Still brighten moderately dark colors
+                                child.material.color.multiplyScalar(2);
+                            }
+                        }
+
+                        // Adjust metalness and roughness for better appearance
+                        if (child.material.metalness !== undefined) {
+                            // Reduce metalness to make it less reflective
+                            child.material.metalness = 0.1;
+                        }
+
+                        if (child.material.roughness !== undefined) {
+                            // Increase roughness for better diffuse lighting
+                            child.material.roughness = 0.9;
+                        }
+
+                        // Add emissive glow to make it visible even in shadows
+                        if (child.material.emissive && child.material.color) {
+                            // Make it emit light based on its color
+                            child.material.emissive.copy(child.material.color);
+                            child.material.emissive.multiplyScalar(0.3); // 30% emissive
+                            child.material.emissiveIntensity = 0.5;
+                        }
+                    }
+                }
+            });
+
+            console.log('Tower model loaded successfully');
+
+            // Remove all old pillars from the scene before generating new ones
+            pillars.forEach(pillar => {
+                scene.remove(pillar);
+                // Also dispose of geometries and materials to free memory
+                pillar.traverse((child) => {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) {
+                        if (Array.isArray(child.material)) {
+                            child.material.forEach(mat => mat.dispose());
+                        } else {
+                            child.material.dispose();
+                        }
+                    }
+                });
+            });
+            pillars = [];
+
+            // Remove old barriers
+            barriers.forEach(barrier => scene.remove(barrier));
+            barriers = [];
+
+            // Remove old golden ring
+            if (goldenRing) {
+                scene.remove(goldenRing);
+                goldenRing = null;
+            }
+
+            // Generate pillars NOW that the model is loaded
+            generatePillars();
+
+            // Create boundary barriers
+            createBarriers();
+
+            // Create golden ring at the end
+            createGoldenRing();
+        },
+        function (xhr) {
+            // Loading progress
+            console.log('Tower: ' + (xhr.loaded / xhr.total * 100) + '% loaded');
+        },
+        function (error) {
+            // Error handling
+            console.error('Error loading tower model:', error);
+            alert('Failed to load tower model. Using default pillars.');
+
+            // Generate pillars with fallback boxes
+            generatePillars();
+            createBarriers();
+            createGoldenRing();
+        }
+    );
+}
+
+
+// Create ground based on level theme
+function createGround(level = 1) {
+    // Remove existing ground if it exists
+    if (ground) {
+        scene.remove(ground);
+        ground.geometry.dispose();
+        ground.material.dispose();
+        ground = null;
+    }
+
+    const theme = LEVEL_THEMES[level];
+
+    // Create a texture based on the level theme
     const canvas = document.createElement('canvas');
     canvas.width = 512;
     canvas.height = 512;
     const ctx = canvas.getContext('2d');
 
-    // Base grass color
-    ctx.fillStyle = '#3a9d23';
+    // Base color
+    ctx.fillStyle = theme.groundColor;
     ctx.fillRect(0, 0, 512, 512);
 
-    // Add grass texture variation
-    for (let i = 0; i < 8000; i++) {
-        const x = Math.random() * 512;
-        const y = Math.random() * 512;
-        const shade = Math.random() * 0.3 + 0.7;
-        const green = Math.floor(157 * shade);
-        const red = Math.floor(58 * shade);
-        const blue = Math.floor(35 * shade);
-        ctx.fillStyle = `rgb(${red}, ${green}, ${blue})`;
-        ctx.fillRect(x, y, 2, 2);
+    // Add texture variation based on level
+    if (level === 1) { // Grass
+        // Add grass texture variation
+        for (let i = 0; i < 8000; i++) {
+            const x = Math.random() * 512;
+            const y = Math.random() * 512;
+            const shade = Math.random() * 0.3 + 0.7;
+            const green = Math.floor(theme.groundVariation.g * shade);
+            const red = Math.floor(theme.groundVariation.r * shade);
+            const blue = Math.floor(theme.groundVariation.b * shade);
+            ctx.fillStyle = `rgb(${red}, ${green}, ${blue})`;
+            ctx.fillRect(x, y, 2, 2);
+        }
+
+        // Add darker patches for realism
+        for (let i = 0; i < 50; i++) {
+            const x = Math.random() * 512;
+            const y = Math.random() * 512;
+            const radius = Math.random() * 20 + 10;
+            const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+            gradient.addColorStop(0, 'rgba(45, 122, 31, 0.3)');
+            gradient.addColorStop(1, 'rgba(45, 122, 31, 0)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+        }
+    } else if (level === 2) { // Ice
+        // Add ice cracks and texture
+        for (let i = 0; i < 100; i++) {
+            const x = Math.random() * 512;
+            const y = Math.random() * 512;
+            const length = Math.random() * 50 + 20;
+            const angle = Math.random() * Math.PI * 2;
+            ctx.strokeStyle = 'rgba(180, 220, 240, 0.5)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(x + Math.cos(angle) * length, y + Math.sin(angle) * length);
+            ctx.stroke();
+        }
+
+        // Add sparkle effect
+        for (let i = 0; i < 3000; i++) {
+            const x = Math.random() * 512;
+            const y = Math.random() * 512;
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.fillRect(x, y, 1, 1);
+        }
+    } else if (level === 3) { // Desert
+        // Add sand texture
+        for (let i = 0; i < 10000; i++) {
+            const x = Math.random() * 512;
+            const y = Math.random() * 512;
+            const shade = Math.random() * 0.2 + 0.8;
+            const r = Math.floor(theme.groundVariation.r * shade);
+            const g = Math.floor(theme.groundVariation.g * shade);
+            const b = Math.floor(theme.groundVariation.b * shade);
+            ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+            ctx.fillRect(x, y, 1, 1);
+        }
+
+        // Add sand dunes (wavy patterns)
+        for (let i = 0; i < 30; i++) {
+            const y = Math.random() * 512;
+            ctx.strokeStyle = 'rgba(200, 150, 100, 0.2)';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            for (let x = 0; x < 512; x += 10) {
+                ctx.lineTo(x, y + Math.sin(x * 0.1) * 5);
+            }
+            ctx.stroke();
+        }
+    } else if (level === 4) { // Halloween
+        // Add dark purple texture with spooky patterns
+        for (let i = 0; i < 5000; i++) {
+            const x = Math.random() * 512;
+            const y = Math.random() * 512;
+            const shade = Math.random() * 0.3 + 0.7;
+            const r = Math.floor(theme.groundVariation.r * shade);
+            const g = Math.floor(theme.groundVariation.g * shade);
+            const b = Math.floor(theme.groundVariation.b * shade);
+            ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+            ctx.fillRect(x, y, 2, 2);
+        }
+
+        // Add orange glowing cracks
+        for (let i = 0; i < 50; i++) {
+            const x = Math.random() * 512;
+            const y = Math.random() * 512;
+            const radius = Math.random() * 15 + 5;
+            const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+            gradient.addColorStop(0, 'rgba(255, 136, 0, 0.4)');
+            gradient.addColorStop(1, 'rgba(255, 136, 0, 0)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+        }
+    } else if (level === 5) { // Above clouds
+        // Create fluffy cloud texture
+        for (let i = 0; i < 100; i++) {
+            const x = Math.random() * 512;
+            const y = Math.random() * 512;
+            const radius = Math.random() * 40 + 20;
+            const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+            gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+            gradient.addColorStop(0.5, 'rgba(240, 240, 255, 0.8)');
+            gradient.addColorStop(1, 'rgba(220, 220, 240, 0)');
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Add soft shadows for depth
+        for (let i = 0; i < 50; i++) {
+            const x = Math.random() * 512;
+            const y = Math.random() * 512;
+            const radius = Math.random() * 30 + 10;
+            ctx.fillStyle = 'rgba(200, 200, 220, 0.2)';
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
     }
 
-    // Add darker patches for realism
-    for (let i = 0; i < 50; i++) {
-        const x = Math.random() * 512;
-        const y = Math.random() * 512;
-        const radius = Math.random() * 20 + 10;
-        const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
-        gradient.addColorStop(0, 'rgba(45, 122, 31, 0.3)');
-        gradient.addColorStop(1, 'rgba(45, 122, 31, 0)');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
-    }
-
-    const grassTexture = new THREE.CanvasTexture(canvas);
-    grassTexture.wrapS = THREE.RepeatWrapping;
-    grassTexture.wrapT = THREE.RepeatWrapping;
-    grassTexture.repeat.set(100, 160);
+    const groundTexture = new THREE.CanvasTexture(canvas);
+    groundTexture.wrapS = THREE.RepeatWrapping;
+    groundTexture.wrapT = THREE.RepeatWrapping;
+    groundTexture.repeat.set(100, 160);
 
     const groundGeometry = new THREE.PlaneGeometry(10000, 16000, 100, 100);
     const groundMaterial = new THREE.MeshStandardMaterial({
-        map: grassTexture,
-        roughness: 0.8,
-        metalness: 0.1,
+        map: groundTexture,
+        roughness: level === 2 ? 0.2 : 0.8, // Ice is smoother
+        metalness: level === 2 ? 0.3 : 0.1, // Ice is more reflective
         side: THREE.DoubleSide
     });
 
-    const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+    ground = new THREE.Mesh(groundGeometry, groundMaterial);
     ground.rotation.x = Math.PI / 2;
     ground.position.y = 0;
     ground.position.z = 8000; // Move ground forward so it extends from 0 to 16000
@@ -244,34 +548,58 @@ function createGround() {
 function createPillar(xPosition, zPosition) {
     const pillarGroup = new THREE.Group();
 
-    const pillarGeometry = new THREE.BoxGeometry(PILLAR_WIDTH, PILLAR_HEIGHT, PILLAR_WIDTH);
-    const pillarMaterial = new THREE.MeshStandardMaterial({
-        color: 0x666666,
-        roughness: 0.7,
-        metalness: 0.3
-    });
+    // Check if tower model is loaded
+    if (towerModel) {
+        // Clone the tower model
+        const towerClone = towerModel.clone();
 
-    const pillar = new THREE.Mesh(pillarGeometry, pillarMaterial);
-    pillar.position.set(xPosition, PILLAR_HEIGHT / 2, zPosition);
-    pillar.castShadow = true;
-    pillar.receiveShadow = true;
+        // Enable shadows for all meshes in the cloned model
+        towerClone.traverse((child) => {
+            if (child.isMesh) {
+                child.castShadow = true;
+                child.receiveShadow = true;
+            }
+        });
 
-    // Add a glowing top
-    const topGeometry = new THREE.BoxGeometry(PILLAR_WIDTH + 0.2, 0.5, PILLAR_WIDTH + 0.2);
-    const topMaterial = new THREE.MeshStandardMaterial({
-        color: 0xff0000,
-        emissive: 0xff0000,
-        emissiveIntensity: 0.5,
-        roughness: 0.3,
-        metalness: 0.7
-    });
-    const top = new THREE.Mesh(topGeometry, topMaterial);
-    top.position.set(xPosition, PILLAR_HEIGHT + 0.25, zPosition);
-    top.castShadow = true;
-    top.receiveShadow = true;
+        // Position the tower
+        towerClone.position.set(xPosition, 0, zPosition);
 
-    pillarGroup.add(pillar);
-    pillarGroup.add(top);
+        // You can adjust the scale if needed
+        // towerClone.scale.set(1, 1, 1);
+
+        pillarGroup.add(towerClone);
+    } else {
+        // Fallback to default pillar if model not loaded yet
+        const pillarGeometry = new THREE.BoxGeometry(PILLAR_WIDTH, PILLAR_HEIGHT, PILLAR_WIDTH);
+        const pillarMaterial = new THREE.MeshStandardMaterial({
+            color: 0x666666,
+            roughness: 0.7,
+            metalness: 0.3
+        });
+
+        const pillar = new THREE.Mesh(pillarGeometry, pillarMaterial);
+        pillar.position.set(xPosition, PILLAR_HEIGHT / 2, zPosition);
+        pillar.castShadow = true;
+        pillar.receiveShadow = true;
+
+        // Add a glowing top
+        const topGeometry = new THREE.BoxGeometry(PILLAR_WIDTH + 0.2, 0.5, PILLAR_WIDTH + 0.2);
+        const topMaterial = new THREE.MeshStandardMaterial({
+            color: 0xff0000,
+            emissive: 0xff0000,
+            emissiveIntensity: 0.5,
+            roughness: 0.3,
+            metalness: 0.7
+        });
+        const top = new THREE.Mesh(topGeometry, topMaterial);
+        top.position.set(xPosition, PILLAR_HEIGHT + 0.25, zPosition);
+        top.castShadow = true;
+        top.receiveShadow = true;
+
+        pillarGroup.add(pillar);
+        pillarGroup.add(top);
+    }
+
     pillarGroup.position.set(0, 0, 0);
     pillarGroup.userData = { xPosition, zPosition, passed: false };
 
@@ -282,7 +610,8 @@ function createPillar(xPosition, zPosition) {
 // Generate random pillars across the map
 function generatePillars() {
     // Generate pillars scattered across a wide area
-    for (let z = 20; z < levelDistance - 100; z += PILLAR_SPACING) {
+    // Start at 60m to give player a safe zone at the beginning
+    for (let z = 60; z < levelDistance - 100; z += PILLAR_SPACING) {
         // Random number of pillars per row (1-3)
         const numPillars = Math.floor(Math.random() * 3) + 1;
 
@@ -292,6 +621,42 @@ function generatePillars() {
             createPillar(xPosition, z);
         }
     }
+}
+
+// Create invisible barrier walls to constrain plane movement
+function createBarriers() {
+    // Remove existing barriers if any
+    barriers.forEach(barrier => scene.remove(barrier));
+    barriers = [];
+
+    const BARRIER_X_POSITION = 42; // Slightly beyond the pillar spawn area (-40 to 40)
+    const barrierHeight = 100; // Tall enough to prevent flying over
+    const barrierDepth = levelDistance; // Extends the full length of the level
+
+    // Create left barrier
+    const leftBarrierGeometry = new THREE.BoxGeometry(1, barrierHeight, barrierDepth);
+    const barrierMaterial = new THREE.MeshStandardMaterial({
+        color: 0xff0000,
+        transparent: true,
+        opacity: 0, // Completely invisible
+        roughness: 0.5,
+        metalness: 0.5
+    });
+    const leftBarrier = new THREE.Mesh(leftBarrierGeometry, barrierMaterial);
+    leftBarrier.position.set(-BARRIER_X_POSITION, barrierHeight / 2, barrierDepth / 2);
+    leftBarrier.visible = false; // Make invisible
+    leftBarrier.userData = { isBarrier: true, xPosition: -BARRIER_X_POSITION };
+    scene.add(leftBarrier);
+    barriers.push(leftBarrier);
+
+    // Create right barrier
+    const rightBarrierGeometry = new THREE.BoxGeometry(1, barrierHeight, barrierDepth);
+    const rightBarrier = new THREE.Mesh(rightBarrierGeometry, barrierMaterial);
+    rightBarrier.position.set(BARRIER_X_POSITION, barrierHeight / 2, barrierDepth / 2);
+    rightBarrier.visible = false; // Make invisible
+    rightBarrier.userData = { isBarrier: true, xPosition: BARRIER_X_POSITION };
+    scene.add(rightBarrier);
+    barriers.push(rightBarrier);
 }
 
 // Create golden ring at the end of the level
@@ -343,6 +708,72 @@ function createGoldenRing() {
     goldenRing = ringGroup;
 }
 
+// Update scene theme based on level
+function updateSceneTheme(level = 1) {
+    const theme = LEVEL_THEMES[level];
+
+    // Update sky background (image or solid color)
+    if (theme.skyBackground) {
+        // Load sky background image
+        const textureLoader = new THREE.TextureLoader();
+        textureLoader.load(
+            theme.skyBackground,
+            function (texture) {
+                // Create a large plane for the sky background at the horizon
+                // Remove old sky plane if it exists
+                const oldSkyPlane = scene.getObjectByName('skyBackgroundPlane');
+                if (oldSkyPlane) {
+                    scene.remove(oldSkyPlane);
+                }
+
+                // Create a huge plane positioned at the horizon
+                const skyGeometry = new THREE.PlaneGeometry(50000, 10000);
+                const skyMaterial = new THREE.MeshBasicMaterial({
+                    map: texture,
+                    side: THREE.DoubleSide,
+                    depthWrite: false
+                });
+                const skyPlane = new THREE.Mesh(skyGeometry, skyMaterial);
+                skyPlane.name = 'skyBackgroundPlane';
+
+                // Position it far away at the horizon, at ground level
+                skyPlane.position.set(0, 5000, 15000); // High up and far away
+                skyPlane.rotation.x = 0; // Vertical
+
+                scene.add(skyPlane);
+
+                // Set scene background to theme color as fallback
+                scene.background = new THREE.Color(theme.skyColor);
+            },
+            undefined,
+            function (error) {
+                console.error('Error loading sky background:', error);
+                // Fallback to solid color
+                scene.background = new THREE.Color(theme.skyColor);
+            }
+        );
+    } else {
+        // No image, use solid color
+        scene.background = new THREE.Color(theme.skyColor);
+
+        // Remove sky plane if it exists
+        const oldSkyPlane = scene.getObjectByName('skyBackgroundPlane');
+        if (oldSkyPlane) {
+            scene.remove(oldSkyPlane);
+        }
+    }
+
+    // Update fog
+    scene.fog = new THREE.Fog(theme.fogColor, 50, 20000);
+
+    // Update ambient light color
+    const ambientLight = scene.children.find(child => child.type === 'AmbientLight');
+    if (ambientLight) {
+        ambientLight.color = new THREE.Color(theme.ambientLight);
+    }
+}
+
+
 // Handle window resize
 function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -374,14 +805,32 @@ function selectLevel(event) {
     const levelNum = parseInt(event.target.dataset.level);
     const level = LEVELS[levelNum - 1];
 
-    if (!level.unlocked) {
+    // Only check if locked when LOCK_LEVEL is true
+    if (LOCK_LEVEL && !level.unlocked) {
         alert(`Level ${levelNum} is locked! Complete level ${levelNum - 1} first.`);
         return;
     }
 
     currentLevel = levelNum;
     levelDistance = level.distance;
-    startGame();
+
+    // Apply level theme before starting
+    updateSceneTheme(currentLevel);
+    createGround(currentLevel);
+
+    // Remove old pillars
+    pillars.forEach(pillar => scene.remove(pillar));
+    pillars = [];
+
+    // Reload tower model for the selected level (will generate pillars, barriers, and golden ring)
+    loadTowerModel();
+
+    // Hide start screen
+    document.getElementById('start-screen').classList.add('hidden');
+
+    // Start the game
+    gameStarted = true;
+    gameOver = false;
 }
 
 // Start game
@@ -393,6 +842,21 @@ function startGame() {
 
 // Restart game
 function restartGame() {
+    // Check if we're continuing to next level (button says "Continue")
+    const restartBtn = document.getElementById('restart-btn');
+    const gameOverTitle = document.getElementById('game-over').querySelector('h1');
+
+    if (restartBtn.textContent === 'Continue' && currentLevel < LEVELS.length) {
+        // Advance to next level
+        currentLevel++;
+        levelDistance = LEVELS[currentLevel - 1].distance;
+    }
+
+    // Reset button text and title color for next time
+    restartBtn.textContent = 'Restart Game';
+    gameOverTitle.textContent = 'Game Over!';
+    gameOverTitle.style.color = '';
+
     // Reset game state
     gameOver = false;
     gameStarted = true;
@@ -419,11 +883,14 @@ function restartGame() {
     pillars.forEach(pillar => scene.remove(pillar));
     pillars = [];
 
-    // Generate new pillars
-    generatePillars();
+    // Update level theme (sky, fog, ambient light)
+    updateSceneTheme(currentLevel);
 
-    // Recreate golden ring
-    createGoldenRing();
+    // Recreate ground with level theme
+    createGround(currentLevel);
+
+    // Reload tower model for the new level (will generate pillars after loading)
+    loadTowerModel();
 
     // Hide game over screen
     document.getElementById('game-over').classList.add('hidden');
@@ -668,6 +1135,19 @@ function checkCollisions() {
         }
     });
 
+    // Check barrier collisions - constrain position instead of ending game
+    const BARRIER_X_LIMIT = 42; // Match the barrier position
+    const PLANE_HALF_WIDTH = 3; // Half of plane's wing span
+
+    // Constrain plane within barriers (like hitting a wall)
+    if (planePosition.x - PLANE_HALF_WIDTH < -BARRIER_X_LIMIT) {
+        planePosition.x = -BARRIER_X_LIMIT + PLANE_HALF_WIDTH;
+        plane.position.x = planePosition.x;
+    } else if (planePosition.x + PLANE_HALF_WIDTH > BARRIER_X_LIMIT) {
+        planePosition.x = BARRIER_X_LIMIT - PLANE_HALF_WIDTH;
+        plane.position.x = planePosition.x;
+    }
+
     // Check ground collision
     if (plane.position.y < 0.5) {
         endGame();
@@ -736,21 +1216,15 @@ function completeLevel() {
     document.getElementById('final-distance').textContent = Math.floor(distance);
     gameOverDiv.classList.remove('hidden');
 
-    // Auto-advance to next level after a delay
-    if (currentLevel < LEVELS.length) {
-        setTimeout(() => {
-            gameOverDiv.classList.add('hidden');
-            currentLevel++;
-            levelDistance = LEVELS[currentLevel - 1].distance;
-            restartGame();
-        }, 3000);
-    }
+    // Player must click "Continue" button to advance to next level
+    // No auto-advance
 }
 
 // Update level buttons
 function updateLevelButtons() {
     document.querySelectorAll('.level-btn').forEach((btn, index) => {
-        if (LEVELS[index].unlocked) {
+        // If LOCK_LEVEL is false, unlock all levels for testing
+        if (!LOCK_LEVEL || LEVELS[index].unlocked) {
             btn.classList.remove('locked');
             btn.disabled = false;
         } else {
